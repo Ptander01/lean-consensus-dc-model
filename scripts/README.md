@@ -34,6 +34,7 @@ Complete schema documentation is available in the `schema_exports/` folder:
 - **XML:** ArcGIS-compatible workspace documents for schema import
 
 ## 🗂️ Repository Structure
+```
 lean-consensus-dc-model/
 ├── scripts/ # Python data processing scripts
 │ ├── Schema_Exports/ # Exported schemas (JSON, MD, CSV, XML)
@@ -44,7 +45,7 @@ lean-consensus-dc-model/
 ├── docs/ # Documentation (coming soon)
 ├── config/ # Configuration files (coming soon)
 └── README.md # This file
-
+```
 
 ## 🔧 Key Scripts
 
