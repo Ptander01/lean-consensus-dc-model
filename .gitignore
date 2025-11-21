@@ -1,3 +1,27 @@
+# === ArcGIS / GIS Files ===
+*.aprx
+*.tbx
+*.gdb/
+*.mxd
+*.lock
+*.shp
+*.shx
+*.dbf
+*.cpg
+*.sbn
+*.sbx
+*.prj
+*.shp.xml
+
+# Large data files
+*.xlsx
+*.xlsm
+data/raw/*
+exports/*.gdb/
+
+# === Python (already included below) ===
+# ...existing Python rules...
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
