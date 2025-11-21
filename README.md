@@ -12,6 +12,20 @@ Build an interactive ESRI Experience Builder dashboard to:
 **Total Capacity:** 31,780 MW  
 **Primary Companies:** Meta (68.8%), Oracle (29.5%)
 
+## 📊 Schema Documentation
+
+Complete schema documentation is available in the `schema_exports/` folder:
+
+- **[gold_buildings Schema](schema_exports/gold_buildings_schema.md)** - 599 building records, 50+ fields
+- **[gold_campus Schema](schema_exports/gold_campus_schema.md)** - 237 campus rollups with aggregations
+- **[Schema Exports README](schema_exports/README.md)** - Overview of all export formats
+
+### Quick Reference
+- **JSON:** Machine-readable schema for APIs and automation
+- **Markdown:** Human-readable documentation (renders beautifully on GitHub)
+- **CSV:** Excel-compatible field lists
+- **XML:** ArcGIS-compatible workspace documents for schema import
+
 ## 🗂️ Repository Structure
 ├── scripts/ # Python data processing scripts
 ├── docs/ # Documentation and schema references
