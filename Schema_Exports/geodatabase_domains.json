@@ -1,0 +1,86 @@
+[
+  {
+    "name": "dm_record_level",
+    "description": "Granularity of record",
+    "type": "CodedValue",
+    "field_type": "Text",
+    "split_policy": "DefaultValue",
+    "merge_policy": "DefaultValue",
+    "coded_values": {
+      "Building": "Building",
+      "Campus": "Campus"
+    }
+  },
+  {
+    "name": "dm_feed_config",
+    "description": "Electrical feed configuration",
+    "type": "CodedValue",
+    "field_type": "Text",
+    "split_policy": "DefaultValue",
+    "merge_policy": "DefaultValue",
+    "coded_values": {
+      "Single": "Single",
+      "Dual": "Dual",
+      "Unknown": "Unknown"
+    }
+  },
+  {
+    "name": "dm_type_category",
+    "description": "Type category",
+    "type": "CodedValue",
+    "field_type": "Text",
+    "split_policy": "DefaultValue",
+    "merge_policy": "DefaultValue",
+    "coded_values": {
+      "Hyperscale": "Hyperscale",
+      "Colocation": "Colocation",
+      "Mixed": "Mixed",
+      "Unknown": "Unknown"
+    }
+  },
+  {
+    "name": "dm_owned_leased",
+    "description": "Ownership model",
+    "type": "CodedValue",
+    "field_type": "Text",
+    "split_policy": "DefaultValue",
+    "merge_policy": "DefaultValue",
+    "coded_values": {
+      "Owned": "Owned",
+      "Leased": "Leased",
+      "Mixed": "Mixed",
+      "Unknown": "Unknown"
+    }
+  },
+  {
+    "name": "dm_facility_status",
+    "description": "Facility lifecycle status",
+    "type": "CodedValue",
+    "field_type": "Text",
+    "split_policy": "DefaultValue",
+    "merge_policy": "DefaultValue",
+    "coded_values": {
+      "Rumor": "Rumor",
+      "Announced": "Announced",
+      "Land Acquisition": "Land Acquisition",
+      "Permitting": "Permitting",
+      "Under Construction": "Under Construction",
+      "Active": "Active",
+      "Unknown": "Unknown"
+    }
+  },
+  {
+    "name": "dm_purpose",
+    "description": "Purpose Built vs Retrofit",
+    "type": "CodedValue",
+    "field_type": "Text",
+    "split_policy": "DefaultValue",
+    "merge_policy": "DefaultValue",
+    "coded_values": {
+      "Purpose Built": "Purpose Built",
+      "Retrofit": "Retrofit",
+      "Mixed": "Mixed",
+      "Unknown": "Unknown"
+    }
+  }
+]
