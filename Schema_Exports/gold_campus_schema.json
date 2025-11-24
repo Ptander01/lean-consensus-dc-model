@@ -1,6 +1,6 @@
 {
   "feature_class": "gold_campus",
-  "export_date": "2025-11-21 16:50:45",
+  "export_date": "2025-11-24 16:00:49",
   "geometry_type": "Point",
   "record_count": 237,
   "spatial_reference": {
@@ -570,6 +570,18 @@
       "precision": 0,
       "scale": 0,
       "alias": "Data Center Footprint Acreage",
+      "nullable": true,
+      "required": false,
+      "editable": true,
+      "domain": null
+    },
+    {
+      "name": "source",
+      "type": "String",
+      "length": 200,
+      "precision": 0,
+      "scale": 0,
+      "alias": "Data Source(s)",
       "nullable": true,
       "required": false,
       "editable": true,
