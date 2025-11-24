@@ -85,8 +85,8 @@ Full documentation includes:
 
 ## 🚧 In Progress
 
-- [x ] Region name standardization (AMER vs NorthAmerica)
-- [ x] Company name corrections (Mortenson → Meta)
+- [ ] Region name standardization (AMER vs NorthAmerica)
+- [ ] Company name corrections (Mortenson → Meta)
 - [ ] Duplicate detection analysis
 - [ ] ESRI Experience Builder dashboard development
 
