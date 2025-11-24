@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 
 # ============================================================================
-# CAMPUS ROLLUP WORKFLOW - WITH COST/ACREAGE + YEAR MW FIELDS
+# CAMPUS ROLLUP WORKFLOW - WITH SOURCE TRACKING + COST/ACREAGE + YEAR MW FIELDS
 # ============================================================================
 
 gdb_path = r"C:\Users\ptanderson\Documents\ArcGIS\Projects\Lean Consensus DC Model\Default.gdb"
@@ -14,7 +14,7 @@ gold_buildings = os.path.join(gdb_path, "gold_buildings")
 gold_campus = os.path.join(gdb_path, "gold_campus")
 
 print("="*80)
-print("CAMPUS ROLLUP WORKFLOW - WITH COST/ACREAGE + YEAR MW FIELDS")
+print("CAMPUS ROLLUP WORKFLOW - WITH SOURCE TRACKING")
 print("="*80)
 
 # Verify gold_buildings exists and has records
@@ -25,6 +25,28 @@ if not arcpy.Exists(gold_buildings):
 building_count = int(arcpy.management.GetCount(gold_buildings)[0])
 print(f"\nStarting with {building_count} building records")
 
+# Step 0: Build source lookup dictionary
+print("\nStep 0: Building source lookup by campus_id...")
+source_lookup = {}
+
+with arcpy.da.SearchCursor(gold_buildings, ['campus_id', 'source']) as cursor:
+    for row in cursor:
+        campus_id = row[0]
+        source = row[1]
+
+        if campus_id not in source_lookup:
+            source_lookup[campus_id] = set()
+
+        if source:  # Only add non-null sources
+            source_lookup[campus_id].add(source)
+
+# Convert sets to sorted semicolon-separated strings
+for campus_id in source_lookup:
+    source_lookup[campus_id] = "; ".join(sorted(source_lookup[campus_id]))
+
+print(f"   - Built source lookup for {len(source_lookup)} campuses")
+print(f"   - Sample: {list(source_lookup.items())[:3]}")
+
 # Step 1: Clear gold_campus
 print("\nStep 1: Clearing gold_campus...")
 arcpy.management.TruncateTable(gold_campus)
@@ -33,17 +55,15 @@ print("   - gold_campus truncated")
 # Step 2: Pairwise Dissolve by campus_id
 print("\nStep 2: Dissolving buildings by campus_id...")
 
-# Use geodatabase workspace instead of in_memory
 dissolved_fc = os.path.join(gdb_path, "temp_dissolved_campus")
 
-# Delete if exists from previous run
 if arcpy.Exists(dissolved_fc):
     arcpy.management.Delete(dissolved_fc)
     print("   - Deleted existing temp_dissolved_campus")
 
 # Check if new fields exist in gold_buildings
 building_fields = [f.name for f in arcpy.ListFields(gold_buildings)]
-has_cost_fields = all(f in building_fields for f in ['total_cost_usd_million', 'land_cost_usd_million', 
+has_cost_fields = all(f in building_fields for f in ['total_cost_usd_million', 'land_cost_usd_million',
                                                        'total_site_acres', 'data_center_acres'])
 
 # Check for year MW fields
@@ -103,15 +123,14 @@ try:
         statistics_fields=stats_fields,
         multi_part="MULTI_PART"
     )
-    
-    # Verify it was created
+
     if not arcpy.Exists(dissolved_fc):
         print("   ERROR: Dissolve failed - output not created")
         exit()
-    
+
     dissolved_count = int(arcpy.management.GetCount(dissolved_fc)[0])
     print(f"   - Dissolve complete - {dissolved_count} campus polygons created")
-    
+
 except Exception as e:
     print(f"   ERROR during dissolve: {str(e)}")
     exit()
@@ -121,7 +140,6 @@ print("\nStep 3: Creating representative points...")
 
 point_fc = os.path.join(gdb_path, "temp_campus_points")
 
-# Delete if exists from previous run
 if arcpy.Exists(point_fc):
     arcpy.management.Delete(point_fc)
 
@@ -131,15 +149,14 @@ try:
         out_feature_class=point_fc,
         point_location="INSIDE"
     )
-    
-    # Verify it was created
+
     if not arcpy.Exists(point_fc):
         print("   ERROR: FeatureToPoint failed - output not created")
         exit()
-    
+
     point_count = int(arcpy.management.GetCount(point_fc)[0])
     print(f"   - Points created - {point_count} campus points")
-    
+
 except Exception as e:
     print(f"   ERROR during FeatureToPoint: {str(e)}")
     exit()
@@ -147,7 +164,6 @@ except Exception as e:
 # Step 4: Map fields and insert into gold_campus
 print("\nStep 4: Mapping fields to gold_campus schema...")
 
-# Get dissolved fields
 dissolved_fields = [f.name for f in arcpy.ListFields(point_fc)]
 print(f"   - Point feature class has {len(dissolved_fields)} fields")
 
@@ -158,6 +174,9 @@ campus_has_cost_fields = all(f in campus_fields for f in ['total_cost_usd_millio
 
 # Check if gold_campus has year MW fields
 campus_has_year_fields = all(f in campus_fields for f in [f'mw_{year}' for year in range(2023, 2033)])
+
+# Check if gold_campus has source field
+campus_has_source = 'source' in campus_fields
 
 # Define insert fields
 insert_fields = [
@@ -170,21 +189,25 @@ insert_fields = [
     'ingest_date'
 ]
 
+# Add source field if it exists in gold_campus
+if campus_has_source:
+    insert_fields.append('source')
+    print("   - Including source field in insert")
+else:
+    print("   - WARNING: source field not in gold_campus - need to add it first")
+    print("   - Run: arcpy.management.AddField(gold_campus, 'source', 'TEXT', field_length=200)")
+
 # Add cost/acreage fields to insert if they exist in gold_campus
 if campus_has_cost_fields:
     insert_fields.extend(['total_cost_usd_million', 'land_cost_usd_million',
                           'total_site_acres', 'data_center_acres'])
     print("   - Including cost/acreage fields in insert")
-else:
-    print("   - Cost/acreage fields not in gold_campus - need to add them first")
 
 # Add year MW fields to insert if they exist in gold_campus
 if campus_has_year_fields:
     for year in range(2023, 2033):
         insert_fields.append(f'mw_{year}')
     print("   - Including mw_2023-2032 fields in insert")
-else:
-    print("   - Year MW fields not in gold_campus - need to add them first")
 
 # Status rank to status mapping
 status_map = {
@@ -212,10 +235,10 @@ def get_field_value(row, field_name, fields_list):
 try:
     with arcpy.da.SearchCursor(point_fc, ['SHAPE@'] + dissolved_fields) as s_cursor:
         with arcpy.da.InsertCursor(gold_campus, insert_fields) as i_cursor:
-            
+
             for row in s_cursor:
                 geom = row[0]
-                
+
                 # Extract dissolved stats
                 campus_id = get_field_value(row, 'campus_id', dissolved_fields)
                 company = get_field_value(row, 'FIRST_company_clean', dissolved_fields)
@@ -229,24 +252,27 @@ try:
                 region = get_field_value(row, 'FIRST_region', dissolved_fields)
                 postal = get_field_value(row, 'FIRST_postal_code', dissolved_fields)
                 address = get_field_value(row, 'FIRST_address', dissolved_fields)
-                
+
                 # Capacity sums
                 planned_mw = get_field_value(row, 'SUM_planned_power_mw', dissolved_fields)
                 uc_mw = get_field_value(row, 'SUM_uc_power_mw', dissolved_fields)
                 commissioned_mw = get_field_value(row, 'SUM_commissioned_power_mw', dissolved_fields)
                 full_cap_mw = get_field_value(row, 'SUM_full_capacity_mw', dissolved_fields)
-                
+
                 # Area sums
                 sqft_sum = get_field_value(row, 'SUM_facility_sqft', dissolved_fields)
                 whitespace_sum = get_field_value(row, 'SUM_whitespace_sqft', dissolved_fields)
-                
+
                 # Aggregations
                 building_count = get_field_value(row, 'COUNT_unique_id', dissolved_fields)
                 first_live = get_field_value(row, 'MIN_actual_live_date', dissolved_fields)
                 min_status_rank = get_field_value(row, 'MIN_status_rank_tmp', dissolved_fields)
                 cancelled = get_field_value(row, 'MAX_cancelled', dissolved_fields)
                 pue_avg = get_field_value(row, 'MEAN_pue', dissolved_fields)
-                
+
+                # Get source from lookup dictionary
+                source_str = source_lookup.get(campus_id, None)
+
                 # Cost and acreage sums (if available)
                 if has_cost_fields and campus_has_cost_fields:
                     total_cost = get_field_value(row, 'SUM_total_cost_usd_million', dissolved_fields)
@@ -258,18 +284,18 @@ try:
                     land_cost = None
                     site_acres = None
                     dc_acres = None
-                
+
                 # Year MW values (if available)
                 year_mw_values = []
                 if has_year_fields and campus_has_year_fields:
                     for year in range(2023, 2033):
                         year_mw = get_field_value(row, f'SUM_mw_{year}', dissolved_fields)
                         year_mw_values.append(year_mw)
-                
+
                 # Calculate derived fields
                 planned_plus_uc = (planned_mw or 0) + (uc_mw or 0) if (planned_mw or uc_mw) else None
                 facility_status = status_map.get(int(min_status_rank) if min_status_rank else 7, 'Unknown')
-                
+
                 # Build insert row
                 insert_row = [
                     geom,                # SHAPE@
@@ -300,18 +326,22 @@ try:
                     'Campus',            # record_level
                     current_date         # ingest_date
                 ]
-                
+
+                # Add source if field exists
+                if campus_has_source:
+                    insert_row.append(source_str)
+
                 # Add cost/acreage if fields exist
                 if campus_has_cost_fields:
                     insert_row.extend([total_cost, land_cost, site_acres, dc_acres])
-                
+
                 # Add year MW values if fields exist
                 if campus_has_year_fields:
                     insert_row.extend(year_mw_values)
-                
+
                 i_cursor.insertRow(insert_row)
                 campus_count += 1
-    
+
     print(f"   - Inserted {campus_count} campus records")
 
 except Exception as e:
@@ -335,8 +365,11 @@ except Exception as e:
 print("\n" + "="*80)
 print(f"CAMPUS ROLLUP COMPLETE")
 print(f"   - gold_campus: {campus_count} records")
+if campus_has_source:
+    print(f"   - Source field populated with concatenated sources")
 if campus_has_cost_fields:
     print(f"   - Cost/acreage fields aggregated via SUM")
 if campus_has_year_fields:
     print(f"   - Year MW fields (2023-2032) aggregated via SUM")
 print("="*80)
+
