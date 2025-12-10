@@ -4,7 +4,38 @@
 
 This document provides a comprehensive summary of the data ingestion, processing, analysis, accuracy assessment, and visualization pipeline for the Lean Consensus Data Center Model. The pipeline integrates multiple external data sources with Meta's internal canonical datacenter inventory to create a unified, validated view of global datacenter facilities.
 
-**Last Updated:** December 9, 2025 (Consolidated redundant scripts)
+**Last Updated:** December 10, 2024
+**Status:** ✅ LEAN MODEL COMPLETE — Ready to transition to FULL DATA
+
+---
+
+### LEAN MODEL SUMMARY
+
+This "Lean" model focused on **Meta/Oracle facilities only** (~663 records) to:
+- ✅ Prove the ingestion pipeline
+- ✅ Validate spatial accuracy methodology
+- ✅ Benchmark vendor data quality
+- ✅ Develop capacity accuracy analysis
+- ✅ Create reusable, production-ready scripts
+
+| Deliverable | Status | Key Metric |
+|-------------|--------|------------|
+| **Spatial Accuracy Analysis** | ✅ Complete | DCH: 89.9% recall, 233m median |
+| **Capacity Accuracy Analysis** | ✅ Complete | Semianalysis: 11.9% MAPE (Complete Builds) |
+| **Ingestion Pipeline** | ✅ Production-ready | 6 scripts, duplicate prevention |
+| **All Scripts Validated** | ✅ No errors | All scripts pass py_compile |
+
+---
+
+### Recent Updates (Dec 9-10, 2024)
+- ✅ **Semianalysis ingestion fixed** - Building-level coordinates now properly populated
+- ✅ **DataCenterMap ingestion created** - New script with duplicate prevention
+- ✅ **Spatial join rebuilt** - `accuracy_analysis_multi_source_REBUILT` uses current gold_buildings
+- ✅ **Semianalysis accuracy improved** - Median distance dropped from 841m → 307m (63% improvement!)
+- ✅ **All visualization scripts updated** - Now use rebuilt spatial join data
+- ✅ **Meta canonical integrity validated** - 10,968.61 MW total, suite→building aggregation verified
+- ✅ **Capacity accuracy analysis v2 created** - Apples-to-apples comparison with field definitions
+- ✅ **Variance analysis completed** - Identified root causes of capacity error (year alignment, outliers)
 
 ---
 
@@ -28,13 +59,16 @@ Ingest data from six external datacenter intelligence sources into a unified `go
 
 ### Data Sources
 
-| Source | Script | Description | Key Data |
-|--------|--------|-------------|----------|
-| **DataCenterHawk (DCH)** | `ingest_dch.py` | Hyperscale datacenter database | Facility ID, capacity (kW→MW), status, commissioned year |
-| **New Project Media (NPM)** | `ingest_npm.py` | Datacenter project announcements | Project name, total MW, building size, cost, planned operation date |
-| **SemiAnalysis** | `ingest_semianalysis_CORRECTED.py` | Building-level capacity projections | Time-series capacity (2023-2032), cluster assignments, Excel date conversion |
-| **Synergy** | `ingest_synergy.py` | Datacenter location database | Quarter-based opening dates, owned/leased status, region mapping |
-| **WoodMac** | `ingest_woodmac.py` | Energy market datacenter intelligence | Milestone dates (announced→COD), cost, acreage, partner info |
+| Source | Script | Records | Description | Key Data |
+|--------|--------|---------|-------------|----------|
+| **DataCenterHawk (DCH)** | `ingest_dch.py` | 224 | Hyperscale datacenter database | Facility ID, capacity (kW→MW), status, commissioned year |
+| **DataCenterMap (DCM)** | `ingest_dcm.py` | 67 | Datacenter location database | Stage-based status, power MW, building sqft, pue |
+| **New Project Media (NPM)** | `ingest_npm.py` | 33 | Datacenter project announcements | Project name, total MW, building size, cost, planned operation date |
+| **SemiAnalysis** | `ingest_semianalysis.py` | 178 | Building-level capacity projections | Time-series capacity (2023-2032), cluster assignments, Excel date conversion |
+| **Synergy** | `ingest_synergy.py` | 152 | Datacenter location database | Quarter-based opening dates, owned/leased status, region mapping |
+| **WoodMac** | `ingest_woodmac.py` | 9 | Energy market datacenter intelligence | Milestone dates (announced→COD), cost, acreage, partner info |
+
+**Total gold_buildings:** 663 records (after deduplication)
 
 ### Common Ingestion Features
 
@@ -93,7 +127,38 @@ campus_id = f"{slug(company)}|{slug(city)}|{slug(campus_name)}"
 - `new_build_status`, `activity_status`
 - `region_derived` (AMER/EMEA/APAC)
 
-### 2.2 Campus Rollup (`campus_rollup_new.py`)
+### 2.2 Meta Deduplication (`meta_deduplicate.py`)
+
+**Purpose**: Deduplicate Meta canonical data from suite-level to building-level for accurate spatial analysis.
+
+**Problem Solved**: The raw Meta canonical data (`meta_canonical_v2`) contains records at the **suite level** (e.g., Suite A, B, C, D within Building 1). For accurate spatial accuracy analysis, we need to deduplicate to the **building level** using a composite key.
+
+**Process**:
+1. Add `building_key` field to `meta_canonical_v2`
+2. Calculate composite key: `{dc_code}-{datacenter}` (e.g., "ALT-1", "ALT-2")
+3. Filter to records with valid coordinates (`has_coordinates = 1`)
+4. Dissolve suites to building-level using `building_key`
+5. Aggregate fields:
+   - `COUNT(location_key)` → `suite_count` (suites per building)
+   - `FIRST(dc_code)` → campus identifier
+   - `FIRST(datacenter)` → building number
+   - `FIRST(region_derived)` → region (AMER/EMEA/APAC)
+   - `FIRST(new_build_status)` → build status
+   - `SUM(it_load)` → total IT load per building
+6. Rename dissolved fields for clarity
+7. Validate against expected counts (276 buildings)
+
+**Input**: `meta_canonical_v2` (suite-level records)
+**Output**: `meta_canonical_buildings` (building-level, 276 records)
+
+**Expected Distribution**:
+| Region | Buildings |
+|--------|-----------|
+| AMER | 251 |
+| APAC | 5 |
+| EMEA | 20 |
+
+### 2.3 Campus Rollup (`campus_rollup_new.py`)
 
 **Purpose**: Aggregate building-level records into campus-level summaries.
 
@@ -121,7 +186,48 @@ campus_id = f"{slug(company)}|{slug(city)}|{slug(campus_name)}"
 
 ## 3. Analysis Workflow
 
-### 3.1 Unified Accuracy Analysis (`unified_accuracy_analysis.py`)
+### 3.1 Multi-Source Spatial Accuracy (`multi_source_spatial_accuracy.py`) ⭐ SPATIAL JOIN
+
+**Purpose**: Perform spatial join between Meta canonical buildings and external vendor data to create the base accuracy analysis dataset.
+
+**Version**: v5 (FIXED) - Uses geodesic distance calculation
+
+**Key Features**:
+- **Input**: `meta_canonical_buildings` (276 deduplicated buildings)
+- **Join Features**: `gold_buildings` (all external vendor records)
+- **Method**: Spatial join with CLOSEST match within 50km search radius
+- **Distance**: Haversine formula for accurate geodesic distance in meters
+- **No Company Filter**: Matches by proximity only (catches misclassified records)
+
+**Process**:
+1. Spatial join Meta buildings to external sources (JOIN_ONE_TO_MANY)
+2. Calculate geodesic distance using Haversine formula
+3. Analyze recall and distance accuracy by source
+4. Generate regional breakdown (AMER, EMEA, APAC)
+5. Rank vendors by coverage and spatial accuracy
+
+**Output**: `accuracy_analysis_buildings_v4`
+
+**Metrics Generated**:
+- Recall (% of 276 Meta buildings detected)
+- Distance accuracy (median, mean, range)
+- Threshold analysis (≤100m, ≤500m, ≤1km, ≤5km)
+- Regional recall breakdown
+
+### 3.2 Gold Buildings Audit (`gold_buildings_audit.py`) ⭐ QA
+
+**Purpose**: Audit external vendor data quality before accuracy analysis.
+
+**Location**: `scripts/qa/gold_buildings_audit.py`
+
+**Audits Performed**:
+- Record counts by source
+- Field completeness analysis
+- Capacity data availability
+- Geographic distribution
+- Company name standardization check
+
+### 3.3 Unified Accuracy Analysis (`unified_accuracy_analysis.py`)
 
 **Purpose**: Replicate Accenture's manual benchmarking methodology at scale.
 
@@ -194,6 +300,61 @@ This is the **primary accuracy analysis script** that performs both campus-level
 - `by_region_{timestamp}.csv` - Regional breakdown
 - `by_status_{timestamp}.csv` - Build status breakdown
 - `worst_case_{timestamp}.csv` - Outlier analysis
+
+### 4.2 Capacity Accuracy Analysis ⭐ NEW (Dec 10, 2024)
+
+**Location**: `scripts/qa/`
+
+A suite of scripts for comparing vendor capacity predictions against Meta's actual IT load.
+
+#### Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `validate_canonical_integrity.py` | Verify Meta suite→building aggregation |
+| `capacity_accuracy_analysis_v2.py` | Apples-to-apples capacity comparison |
+| `capacity_variance_experiments.py` | Root cause analysis of errors |
+| `CAPACITY_FIELD_DEFINITIONS.md` | Field definitions documentation |
+
+#### Key Findings
+
+**Best Result: 11.9% MAPE** for Complete Builds using Semianalysis `mw_2023`
+
+| Field | Complete Builds | All Statuses | Bias |
+|-------|-----------------|--------------|------|
+| **mw_2023** | **11.9%** 🏆 | 22.1% | -3.1% |
+| mw_2024 | 14.7% | 23.5% | -2.3% |
+| commissioned_power_mw | 15.7% | 25.1% | +4.0% |
+
+#### Variance Analysis Results
+
+| Source of Error | Impact | Resolution |
+|-----------------|--------|------------|
+| **Year alignment** | Major (3% improvement) | Use `mw_2023` instead of `mw_2024` |
+| **4 outlier buildings** | Major (MAPE → 3.7% without) | FTW-4, VLL-4, ODN-3, LCO-1 |
+| **Active builds** | Inherent (~60% MAPE) | Construction is volatile |
+| **Utilization factor** | None needed | Bias already near 0% |
+| **Spatial matching** | None needed | All matches <1km |
+
+#### Capacity Field Definitions
+
+See `CAPACITY_FIELD_DEFINITIONS.md` for detailed documentation of:
+- What each vendor capacity field measures (IT load vs facility power)
+- Granularity (building vs campus level)
+- Time horizon (current vs forecast)
+- PUE adjustment requirements
+
+#### Apples-to-Apples Comparison Approach
+
+**Building-Level (Semianalysis):**
+- Vendor: `mw_2023` or `commissioned_power_mw`
+- Meta: `meta_canonical_buildings.it_load_total`
+- No adjustment needed (both report IT capacity)
+
+**Campus-Level (DataCenterHawk):**
+- Vendor: `commissioned_power_mw / 1.3` (PUE adjustment)
+- Meta: Aggregated `it_load_total` by `dc_code`
+- Result: 38.9% MAPE (DCH underestimates by 20%)
 
 ---
 
@@ -290,26 +451,30 @@ Same as gold_buildings plus:
 scripts/
 ├── ingestion/
 │   ├── ingest_dch.py              # DataCenterHawk ingestion
+│   ├── ingest_dcm.py              # DataCenterMap ingestion (with duplicate prevention)
 │   ├── ingest_npm.py              # New Project Media ingestion
-│   ├── ingest_semianalysis_CORRECTED.py  # SemiAnalysis ingestion
+│   ├── ingest_semianalysis.py     # SemiAnalysis ingestion (fixed coordinates & company)
 │   ├── ingest_synergy.py          # Synergy ingestion
 │   └── ingest_woodmac.py          # WoodMac ingestion
 │
 ├── processing/
-│   ├── campus_rollup_new.py       # Building → Campus aggregation
-│   └── import_meta_canonical_v2.py # Meta internal data import
+│   ├── import_meta_canonical_v2.py # Meta internal data import (suite-level)
+│   ├── meta_deduplicate.py        # ⭐ Suite → Building deduplication
+│   └── campus_rollup_new.py       # Building → Campus aggregation
 │
 ├── analysis/
-│   ├── unified_accuracy_analysis.py      # ⭐ Complete accuracy workflow (KEEP)
-│   └── campus_level_deep_dive_export.py  # ⭐ Detailed campus comparisons (KEEP)
+│   ├── multi_source_spatial_accuracy.py  # ⭐ Spatial join & accuracy (v5)
+│   ├── unified_accuracy_analysis.py      # Complete accuracy workflow
+│   └── campus_level_deep_dive_export.py  # Detailed campus comparisons
 │
 ├── accuracy/
-│   └── comprehensive_spatial_accuracy_report.py # ⭐ PRIMARY - Both levels (KEEP)
+│   └── comprehensive_spatial_accuracy_report.py # PRIMARY - Both levels
 │
 ├── visualization/
 │   └── plot_spatial_accuracy_LIGHT_THEME.py # Accuracy plots
 │
 ├── qa/
+│   ├── gold_buildings_audit.py    # ⭐ External data quality audit (NEW)
 │   ├── qa_validation.py           # Data validation
 │   └── fix_companies.py           # Company name fixes
 │
@@ -349,23 +514,44 @@ For a complete pipeline run, use this **streamlined workflow**:
 ### Step 1: Ingest External Sources (any order)
 ```
 python ingestion/ingest_dch.py
+python ingestion/ingest_dcm.py
 python ingestion/ingest_npm.py
-python ingestion/ingest_semianalysis_CORRECTED.py
+python ingestion/ingest_semianalysis.py
 python ingestion/ingest_synergy.py
 python ingestion/ingest_woodmac.py
 ```
+
+**Note:** All ingestion scripts include **duplicate prevention** - safe to re-run without creating duplicates.
 
 ### Step 2: Import Meta Canonical
 ```
 python processing/import_meta_canonical_v2.py
 ```
 
-### Step 3: Process Campus Rollup
+### Step 3: Deduplicate Meta to Building-Level ⭐ NEW
+```
+python processing/meta_deduplicate.py
+```
+This creates `meta_canonical_buildings` (276 buildings) from suite-level data.
+
+### Step 4: Process Campus Rollup
 ```
 python processing/campus_rollup_new.py
 ```
 
-### Step 4: Run Accuracy Analysis (choose based on need)
+### Step 4a: Audit External Data Quality (OPTIONAL)
+```
+python qa/gold_buildings_audit.py
+```
+Generates data quality report for `gold_buildings` by source (record counts, field completeness, capacity data availability).
+
+### Step 5: Perform Spatial Join & Initial Accuracy Analysis
+```
+python analysis/multi_source_spatial_accuracy.py
+```
+Creates `accuracy_analysis_buildings_v4` with spatial matches between Meta buildings and external sources.
+
+### Step 6: Run Comprehensive Accuracy Analysis (choose based on need)
 
 **For comprehensive statistics (RECOMMENDED):**
 ```
@@ -382,7 +568,7 @@ python analysis/unified_accuracy_analysis.py
 python analysis/campus_level_deep_dive_export.py
 ```
 
-### Step 5: Generate Visualizations
+### Step 7: Generate Visualizations
 ```
 python visualization/plot_spatial_accuracy_LIGHT_THEME.py
 ```
@@ -400,5 +586,96 @@ python visualization/plot_spatial_accuracy_LIGHT_THEME.py
 
 ---
 
-*Last Updated: December 9, 2025*
+## 9. Feature Classes Reference
+
+### Geodatabase: `Default.gdb`
+
+| Feature Class | Records | Purpose | Updated |
+|---------------|---------|---------|---------|
+| `meta_canonical_v2` | 1,068 | Suite-level Meta ground truth | Stable |
+| `meta_canonical_buildings` | 276 | Building-level (dissolved from suites) | Stable |
+| `gold_buildings` | 663 | Harmonized vendor buildings | Dec 9, 2024 |
+| `gold_campus` | 229 | Campus-level rollup | Dec 9, 2024 |
+| `accuracy_analysis_multi_source` | 13,210 | OLD spatial join (deprecated) | Dec 8, 2024 |
+| `accuracy_analysis_multi_source_REBUILT` | 5,167 | **CURRENT spatial join** | Dec 10, 2024 |
+| `accuracy_analysis_buildings_v4` | 276 | Single closest match per building | Dec 9, 2024 |
+| `accuracy_analysis_buildings_v5` | 276 | Latest single match version | Dec 10, 2024 |
+
+**⚠️ Important:** Use `accuracy_analysis_multi_source_REBUILT` for accuracy analysis - it contains the current building-level coordinates from `gold_buildings`.
+
+---
+
+## 10. Spatial Accuracy Results (Dec 10, 2024)
+
+### Vendor Rankings
+
+| Rank | Source | Recall | Median Distance | Consistency (MAD) |
+|------|--------|--------|-----------------|-------------------|
+| 🥇 | **DataCenterHawk** | 89.9% | 233m | 204m |
+| 🥈 | **Semianalysis** | 88.8% | 307m | 285m |
+| 🥉 | **NewProjectMedia** | 73.2% | 1,002m | 763m |
+| 4 | **DataCenterMap** | 69.6% | 677m | 586m |
+| 5 | **WoodMac** | 30.1% | 1,436m | 837m |
+| 6 | **Synergy** | 58.0% | 5,772m | 2,045m |
+
+### Semianalysis Improvement (Dec 8 → Dec 10)
+
+| Metric | Before Fix | After Fix | Improvement |
+|--------|------------|-----------|-------------|
+| **Median Distance** | 841m | **307m** | **63% better** |
+| **Recall** | 86.2% | 88.8% | +2.6% |
+| **Consistency (MAD)** | 350m | 285m | -65m |
+| **Ranking** | #4 | **#2** | ⬆️ 2 spots |
+
+### Regional Coverage
+
+| Region | Buildings | DCHawk | Semianalysis | DCMap | NPM | WoodMac | Synergy |
+|--------|-----------|--------|--------------|-------|-----|---------|---------|
+| **AMER** | 251 | 90.4% | 89.2% | 68.1% | 80.5% | 33.1% | 57.4% |
+| **APAC** | 5 | 100% | 100% | 100% | 0% | 0% | 100% |
+| **EMEA** | 20 | 80% | 80% | 80% | 0% | 0% | 55% |
+
+**⚠️ NewProjectMedia & WoodMac are US-only** (0% recall in APAC/EMEA)
+
+### Recommendations for Consensus Model
+
+**Spatial Coordinate Priority:**
+1. DataCenterHawk (233m median)
+2. Semianalysis (307m median)
+3. DataCenterMap (677m median)
+
+**Capacity Data Priority:**
+- Current: DataCenterHawk `commissioned_power_mw`
+- Forecast: Semianalysis `mw_2032`
+
+**Exclusions:**
+- Synergy: EXCLUDE from spatial consensus (5,772m median - too inaccurate)
+- Use Synergy for transparency reporting only
+
+---
+
+## 11. Changelog
+
+### December 10, 2024
+- ✅ Rebuilt `accuracy_analysis_multi_source_REBUILT` with current gold_buildings coordinates
+- ✅ Updated `comprehensive_spatial_accuracy_report.py` to use REBUILT table
+- ✅ Updated `plot_spatial_accuracy_LIGHT_THEME.py` to use REBUILT table
+- ✅ Verified Semianalysis spatial accuracy improved (841m → 307m)
+- ✅ Generated new accuracy reports and visualizations
+
+### December 9, 2024
+- ✅ Fixed Semianalysis ingestion - populated `latitude`, `longitude`, `gold_lat`, `gold_lon`, `company_clean`
+- ✅ Renamed `ingest_semianalysis_CORRECTED.py` → `ingest_semianalysis.py`
+- ✅ Created `ingest_dcm.py` with duplicate prevention
+- ✅ Fixed data quality issues (178 Semianalysis records, 67 DCM duplicates removed)
+- ✅ All required fields now 100% populated
+- ✅ All regions properly mapped (NorthAmerica → AMER, etc.)
+
+### December 8, 2024
+- Initial spatial accuracy analysis
+- Identified Semianalysis coordinate issues (841m median - suboptimal)
+
+---
+
+*Last Updated: December 10, 2024*
 *Author: Meta Data Center GIS Team*
